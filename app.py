@@ -10,24 +10,27 @@ import folium
 from streamlit_folium import st_folium
 from shapely.geometry import shape, Polygon
 import geopandas as gpd
+from geopy.geocoders import Nominatim
+import networkx as nx
+import osmnx as ox
 
 st.set_page_config(layout="wide")
 
 # -------------------
-# CONFIG
+# CONFIG & PATHS
 # -------------------
 DATA_DIR = "data"
 os.makedirs(DATA_DIR, exist_ok=True)
 
-# Use API key from Streamlit secrets
+# API key from Streamlit secrets
 ORS_API_KEY = st.secrets["ORS_API_KEY"]
 
 # -------------------
-# DOWNLOAD / BUILD DATASETS
+# DATASETS DOWNLOAD/BUILD
 # -------------------
 @st.cache_data
 def build_datasets():
-    # US ZIP codes
+    # US ZIP codes + population
     zip_csv = os.path.join(DATA_DIR, "uszips.csv")
     if not os.path.exists(zip_csv):
         url = "https://public.opendatasoft.com/explore/dataset/us-zip-code-latitude-and-longitude/download/?format=csv&timezone=America/New_York"
@@ -39,19 +42,24 @@ def build_datasets():
     if "Population" not in df_zip.columns:
         df_zip["Population"] = np.random.randint(1000,50000,len(df_zip))
 
-    # FEMA placeholder
+    # FEMA flood/hurricane placeholder
     fema_csv = os.path.join(DATA_DIR, "fema_risk.csv")
     if not os.path.exists(fema_csv):
+        if 'County' not in df_zip.columns:
+            df_zip['County'] = 'Unknown'
+        if 'State' not in df_zip.columns:
+            df_zip['State'] = 'Unknown'
         counties = df_zip[['County','State']].drop_duplicates()
         np.random.seed(0)
         counties['FloodRisk'] = np.random.uniform(0,1,len(counties))
         counties['HurricaneRisk'] = np.random.uniform(0,1,len(counties))
         counties.to_csv(fema_csv, index=False)
+
     df_fema = pd.read_csv(fema_csv)
 
     # Merge ZIPs with FEMA
-    df_zip['County'] = df_zip['County']
-    df_zip['State'] = df_zip['State']
+    df_zip['County'] = df_zip.get('County', 'Unknown')
+    df_zip['State'] = df_zip.get('State', 'Unknown')
     df = pd.merge(df_zip, df_fema, on=['County','State'], how='left')
 
     # Fill missing values
@@ -75,7 +83,7 @@ coastal_mult = st.sidebar.slider("Coastal Storm Multiplier", 0.1, 3.0, 1.0)
 zip_lookup = st.sidebar.text_input("ZIP Lookup")
 top_n = st.sidebar.slider("Top N Recommended Hubs", 1, 20, 10)
 
-# Scenario sliders for animation
+# Scenario sliders
 flood_scenario = st.sidebar.slider("Flood Severity Scale", 0.0, 2.0, 1.0)
 hurricane_scenario = st.sidebar.slider("Hurricane Severity Scale", 0.0, 2.0, 1.0)
 
@@ -106,7 +114,7 @@ def optimize_hubs(df, k):
 hubs = optimize_hubs(df, hub_count)
 
 # -------------------
-# REALISTIC TRAVEL TIMES USING ORS API
+# REALISTIC TRAVEL TIMES (ORS API)
 # -------------------
 def compute_travel_times(df, hubs):
     headers = {"Authorization": ORS_API_KEY, "Content-Type": "application/json"}
@@ -179,9 +187,7 @@ col3.metric("High Risk ZIPs",(df["RiskWeight"]>df["RiskWeight"].quantile(.9)).su
 m = folium.Map(location=[39,-98], zoom_start=4)
 cluster = MarkerCluster().add_to(m)
 
-# -------------------
-# ADD ZIP POINTS WITH GRADIENT BY RISK
-# -------------------
+# Gradient risk points
 sample = df.sample(min(5000,len(df)))
 for _,row in sample.iterrows():
     color_intensity = int(min(255,row["RiskWeight"]/df["RiskWeight"].max()*255))
@@ -209,9 +215,7 @@ for _,row in top_recommended.iterrows():
         icon=folium.Icon(color='purple', icon='star')
     ).add_to(m)
 
-# -------------------
-# FEMA FLOOD ZONES (EXAMPLE SHAPEFILE OVERLAY)
-# -------------------
+# FEMA Flood Zones
 try:
     fema_url = "https://hazards.fema.gov/gis/nfhl/rest/services/public/NFHL/MapServer/0/query?where=1=1&outFields=*&f=geojson"
     r = requests.get(fema_url)
@@ -220,9 +224,7 @@ try:
 except:
     st.warning("Could not load FEMA flood zones.")
 
-# -------------------
-# ZIP lookup
-# -------------------
+# ZIP Lookup
 if zip_lookup:
     try:
         z = int(zip_lookup)
@@ -246,9 +248,7 @@ if zip_lookup:
     except:
         st.warning("Enter valid ZIP")
 
-# -------------------
-# ANIMATED HURRICANE SIMULATION
-# -------------------
+# Animated hurricane scenario
 try:
     geojson_features = []
     for t in range(5):
@@ -288,3 +288,4 @@ st.download_button("Download Hubs CSV", hubs.to_csv(index=False), "hubs.csv")
 st.subheader("Top Recommended Hub Locations")
 st.dataframe(top_recommended[['Latitude','Longitude','TotalScore','PopulationCovered']])
 st.download_button("Download Recommended Hubs CSV", top_recommended.to_csv(index=False), "recommended_hubs.csv")
+
