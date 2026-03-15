@@ -10,11 +10,14 @@ from streamlit_folium import st_folium
 
 st.set_page_config(layout="wide")
 
+# -------------------
+# DATA PATH
+# -------------------
 DATA_DIR = "data"
 os.makedirs(DATA_DIR, exist_ok=True)
 
 # -------------------
-# DATA LOADING
+# LOAD DATA
 # -------------------
 @st.cache_data
 def load_data():
@@ -29,19 +32,19 @@ def load_data():
     df_fema = pd.read_csv(fema_file)
     df_fema = df_fema.rename(columns={"COUNTY":"County","STATE":"State","FLOOD_RISK":"FloodRisk","STORM_RISK":"HurricaneRisk"})
     
-    # Merge ZIP with FEMA risk by state and county
+    # Merge ZIP with FEMA risk
     df_zip['County'] = df_zip['county_name']
     df_zip['State'] = df_zip['state_id']
     df = pd.merge(df_zip, df_fema[['County','State','FloodRisk','HurricaneRisk']], on=['County','State'], how='left')
     
-    # Fill NA with median risk
+    # Fill missing risk values
     df['FloodRisk'] = df['FloodRisk'].fillna(df['FloodRisk'].median())
     df['HurricaneRisk'] = df['HurricaneRisk'].fillna(df['HurricaneRisk'].median())
     
-    # Historical damage approximation
+    # Historical damage (placeholder)
     df['HistoricalDamage'] = np.random.randint(5000,2000000,len(df))
     
-    # Coastal storm approximation (east coast)
+    # Coastal risk approximation
     df['CoastalRisk'] = np.clip((df['Longitude']>-90)*np.random.uniform(.2,.9,len(df)),0,1)
     
     return df
@@ -49,18 +52,18 @@ def load_data():
 df = load_data()
 
 # -------------------
-# SIDEBAR
+# SIDEBAR CONTROLS
 # -------------------
-st.sidebar.title("HydroHub AI Controls")
-
+st.sidebar.title("HydroHub Controls")
 hub_count = st.sidebar.slider("Number of Hubs", 3, 60, 15)
-flood_mult = st.sidebar.slider("Flood Probability", 0.1, 3.0, 1.0)
-hurr_mult = st.sidebar.slider("Hurricane Probability", 0.1, 3.0, 1.0)
-coastal_mult = st.sidebar.slider("Coastal Storm Probability", 0.1, 3.0, 1.0)
+flood_mult = st.sidebar.slider("Flood Multiplier", 0.1, 3.0, 1.0)
+hurr_mult = st.sidebar.slider("Hurricane Multiplier", 0.1, 3.0, 1.0)
+coastal_mult = st.sidebar.slider("Coastal Storm Multiplier", 0.1, 3.0, 1.0)
 zip_lookup = st.sidebar.text_input("ZIP Lookup")
+top_n = st.sidebar.slider("Top N Recommended Hubs", 1, 20, 10)
 
 # -------------------
-# RISK WEIGHT CALCULATION
+# COMPUTE RISK WEIGHT
 # -------------------
 def compute_weight(df):
     df['RiskWeight'] = df['Population'] * (flood_mult*df['FloodRisk'] + hurr_mult*df['HurricaneRisk'] + coastal_mult*df['CoastalRisk']) * (1 + df['HistoricalDamage']/1e6)
@@ -106,6 +109,16 @@ coverage = df.groupby("NearestHub").agg(
 ).reset_index()
 
 # -------------------
+# RECOMMENDED HUB LOCATIONS
+# -------------------
+df['HubScore'] = df['RiskWeight'] / (df['TravelMinutes'] + 1)
+hub_candidates = df.groupby(['Latitude','Longitude']).agg(
+    TotalScore=('HubScore','sum'),
+    PopulationCovered=('Population','sum')
+).reset_index()
+top_recommended = hub_candidates.sort_values('TotalScore', ascending=False).head(top_n)
+
+# -------------------
 # DASHBOARD
 # -------------------
 st.title("HydroHub AI: Emergency Hub Optimization for Water Disasters")
@@ -134,6 +147,7 @@ for _,row in sample.iterrows():
         fill=True
     ).add_to(cluster)
 
+# Add optimized hubs
 for _,hub in hubs.iterrows():
     folium.Marker(
         [hub['Latitude'],hub['Longitude']],
@@ -141,9 +155,15 @@ for _,hub in hubs.iterrows():
         popup=f"Hub {hub['HubID']}"
     ).add_to(m)
 
-# -------------------
-# ZIP LOOKUP
-# -------------------
+# Add recommended hubs
+for _,row in top_recommended.iterrows():
+    folium.Marker(
+        [row['Latitude'], row['Longitude']],
+        popup=f"Recommended Hub\nScore: {row['TotalScore']:.1f}",
+        icon=folium.Icon(color='purple', icon='star')
+    ).add_to(m)
+
+# ZIP lookup
 if zip_lookup:
     try:
         z = int(zip_lookup)
@@ -167,36 +187,31 @@ if zip_lookup:
     except:
         st.warning("Enter valid ZIP")
 
-# -------------------
-# ADVANCED HEATMAP VISUALIZATION (10x feature)
-# -------------------
+# Risk heatmap
 st.subheader("Risk Heatmap + Hub Coverage")
 heat_data = [[row['Latitude'], row['Longitude'], row['RiskWeight']] for index,row in df.iterrows()]
 HeatMap(heat_data, radius=15, blur=20, max_zoom=10).add_to(m)
 
-# -------------------
-# RENDER MAP
-# -------------------
+# Render map
 st_folium(m, width=1400, height=700)
 
-# -------------------
-# COVERAGE TABLE
-# -------------------
+# Coverage table
 st.subheader("Hub Coverage")
 st.dataframe(coverage)
 st.download_button("Download Coverage CSV", coverage.to_csv(index=False), "hub_coverage.csv")
 
-# -------------------
-# HIGH RISK COMMUNITIES
-# -------------------
+# Top 50 high risk ZIPs
 st.subheader("Top 50 High Risk Communities")
 top = df.sort_values("RiskWeight", ascending=False).head(50)
 st.dataframe(top[['ZIP','Population','RiskWeight','NearestHub','TravelMinutes']])
 st.download_button("Download High Risk CSV", top.to_csv(index=False), "high_risk.csv")
 
-# -------------------
-# HUB LOCATIONS
-# -------------------
+# Hub locations
 st.subheader("Hub Locations")
 st.dataframe(hubs)
 st.download_button("Download Hubs CSV", hubs.to_csv(index=False), "hubs.csv")
+
+# Recommended hubs table
+st.subheader("Top Recommended Hub Locations")
+st.dataframe(top_recommended[['Latitude','Longitude','TotalScore','PopulationCovered']])
+st.download_button("Download Recommended Hubs CSV", top_recommended.to_csv(index=False), "recommended_hubs.csv")
