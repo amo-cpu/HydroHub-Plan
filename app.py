@@ -38,7 +38,28 @@ def build_datasets():
         with open(zip_csv, "wb") as f:
             f.write(r.content)
     df_zip = pd.read_csv(zip_csv)
-    df_zip = df_zip.rename(columns={"Zip":"ZIP","Latitude":"Latitude","Longitude":"Longitude"})
+
+    # Standardize column names from different ZIP datasets
+    df_zip.columns = [c.strip() for c in df_zip.columns]
+
+    if 'Zip' in df_zip.columns:
+        df_zip.rename(columns={'Zip':'ZIP'}, inplace=True)
+    if 'zip' in df_zip.columns:
+        df_zip.rename(columns={'zip':'ZIP'}, inplace=True)
+
+    if 'Latitude' not in df_zip.columns:
+        if 'lat' in df_zip.columns:
+            df_zip.rename(columns={'lat':'Latitude'}, inplace=True)
+    if 'Longitude' not in df_zip.columns:
+        if 'lng' in df_zip.columns:
+            df_zip.rename(columns={'lng':'Longitude'}, inplace=True)
+        if 'lon' in df_zip.columns:
+            df_zip.rename(columns={'lon':'Longitude'}, inplace=True)
+
+    # If still missing coordinates, stop early
+    if 'Latitude' not in df_zip.columns or 'Longitude' not in df_zip.columns:
+        raise ValueError('ZIP dataset must contain Latitude and Longitude columns.')
+
     if "Population" not in df_zip.columns:
         df_zip["Population"] = np.random.randint(1000,50000,len(df_zip))
 
@@ -66,7 +87,11 @@ def build_datasets():
     df['FloodRisk'] = df['FloodRisk'].fillna(df['FloodRisk'].median())
     df['HurricaneRisk'] = df['HurricaneRisk'].fillna(df['HurricaneRisk'].median())
     df['HistoricalDamage'] = np.random.randint(5000,2000000,len(df))
-    df['CoastalRisk'] = np.clip((df['Longitude']>-90)*np.random.uniform(.2,.9,len(df)),0,1)
+    # Coastal risk approximation (only if longitude exists)
+    if 'Longitude' in df.columns:
+        df['CoastalRisk'] = np.clip((df['Longitude'] > -90) * np.random.uniform(.2,.9,len(df)),0,1)
+    else:
+        df['CoastalRisk'] = np.random.uniform(.2,.9,len(df))
 
     return df
 
