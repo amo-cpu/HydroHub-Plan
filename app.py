@@ -29,7 +29,6 @@ ORS_API_KEY = st.secrets["ORS_API_KEY"]
 # -------------------
 @st.cache_data
 def build_datasets():
-    # US ZIP codes + population
     zip_csv = os.path.join(DATA_DIR, "uszips.csv")
     if not os.path.exists(zip_csv):
         url = "https://public.opendatasoft.com/explore/dataset/us-zip-code-latitude-and-longitude/download/?format=csv&timezone=America/New_York"
@@ -38,55 +37,44 @@ def build_datasets():
             f.write(r.content)
     df_zip = pd.read_csv(zip_csv)
 
-   # -------------------
-# Standardize columns robustly
-# -------------------
-df_zip.columns = [c.lower().strip() for c in df_zip.columns]
+    # -------------------
+    # Standardize columns robustly
+    # -------------------
+    df_zip.columns = [c.lower().strip() for c in df_zip.columns]
 
-# Rename known variations to standard names
-rename_map = {
-    "zip": "ZIP",
-    "zipcode": "ZIP",
-    "latitude": "Latitude",
-    "lat": "Latitude",
-    "longitude": "Longitude",
-    "lng": "Longitude",
-    "lon": "Longitude",
-    "county": "County",
-    "state": "State"
-}
-df_zip = df_zip.rename(columns={k:v for k,v in rename_map.items() if k in df_zip.columns})
+    # Rename known variations to standard names
+    rename_map = {
+        "zip": "ZIP",
+        "zipcode": "ZIP",
+        "latitude": "Latitude",
+        "lat": "Latitude",
+        "longitude": "Longitude",
+        "lng": "Longitude",
+        "lon": "Longitude",
+        "county": "County",
+        "state": "State"
+    }
+    df_zip = df_zip.rename(columns={k:v for k,v in rename_map.items() if k in df_zip.columns})
 
-# Ensure required columns exist
-required_cols = ["ZIP","Latitude","Longitude"]
-for col in required_cols:
-    if col not in df_zip.columns:
-        st.error(f"ZIP dataset missing required column: {col}")
-        st.write("Columns found:", df_zip.columns)
-        st.stop()
+    # Ensure required columns exist
+    required_cols = ["ZIP","Latitude","Longitude"]
+    for col in required_cols:
+        if col not in df_zip.columns:
+            st.error(f"ZIP dataset missing required column: {col}")
+            st.write("Columns found:", df_zip.columns)
+            st.stop()
 
-# Add missing columns
-if "Population" not in df_zip.columns:
-    df_zip["Population"] = np.random.randint(1000,50000,len(df_zip))
-if "County" not in df_zip.columns:
-    df_zip["County"] = "Unknown"
-if "State" not in df_zip.columns:
-    df_zip["State"] = "Unknown"
-
-    # If still missing coordinates, stop early
-    if 'Latitude' not in df_zip.columns or 'Longitude' not in df_zip.columns:
-        raise ValueError('ZIP dataset must contain Latitude and Longitude columns.')
-
+    # Add missing columns
     if "Population" not in df_zip.columns:
         df_zip["Population"] = np.random.randint(1000,50000,len(df_zip))
+    if "County" not in df_zip.columns:
+        df_zip["County"] = "Unknown"
+    if "State" not in df_zip.columns:
+        df_zip["State"] = "Unknown"
 
     # FEMA flood/hurricane placeholder
     fema_csv = os.path.join(DATA_DIR, "fema_risk.csv")
     if not os.path.exists(fema_csv):
-        if 'County' not in df_zip.columns:
-            df_zip['County'] = 'Unknown'
-        if 'State' not in df_zip.columns:
-            df_zip['State'] = 'Unknown'
         counties = df_zip[['County','State']].drop_duplicates()
         np.random.seed(0)
         counties['FloodRisk'] = np.random.uniform(0,1,len(counties))
@@ -96,22 +84,18 @@ if "State" not in df_zip.columns:
     df_fema = pd.read_csv(fema_csv)
 
     # Merge ZIPs with FEMA
-    df_zip['County'] = df_zip.get('County', 'Unknown')
-    df_zip['State'] = df_zip.get('State', 'Unknown')
     df = pd.merge(df_zip, df_fema, on=['County','State'], how='left')
 
     # Fill missing values
     df['FloodRisk'] = df['FloodRisk'].fillna(df['FloodRisk'].median())
     df['HurricaneRisk'] = df['HurricaneRisk'].fillna(df['HurricaneRisk'].median())
     df['HistoricalDamage'] = np.random.randint(5000,2000000,len(df))
-    # Coastal risk approximation (only if longitude exists)
     if 'Longitude' in df.columns:
         df['CoastalRisk'] = np.clip((df['Longitude'] > -90) * np.random.uniform(.2,.9,len(df)),0,1)
     else:
         df['CoastalRisk'] = np.random.uniform(.2,.9,len(df))
 
     return df
-
 df = build_datasets()
 
 # -------------------
