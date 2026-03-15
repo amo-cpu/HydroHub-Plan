@@ -2,40 +2,44 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import os
-import requests, zipfile, io
+import requests, zipfile, io, json
 from sklearn.cluster import KMeans
 from scipy.spatial.distance import cdist
-from folium.plugins import MarkerCluster, HeatMap
+from folium.plugins import MarkerCluster, HeatMap, TimestampedGeoJson
 import folium
 from streamlit_folium import st_folium
+from shapely.geometry import shape, Polygon
+import geopandas as gpd
 
 st.set_page_config(layout="wide")
 
 # -------------------
-# DATA PATH
+# CONFIG
 # -------------------
 DATA_DIR = "data"
 os.makedirs(DATA_DIR, exist_ok=True)
 
+# Use API key from Streamlit secrets
+ORS_API_KEY = st.secrets["ORS_API_KEY"]
+
 # -------------------
-# AUTOMATIC DATA DOWNLOAD / BUILD
+# DOWNLOAD / BUILD DATASETS
 # -------------------
 @st.cache_data
 def build_datasets():
-    # 1) US ZIP codes + lat/lon + population
+    # US ZIP codes
     zip_csv = os.path.join(DATA_DIR, "uszips.csv")
     if not os.path.exists(zip_csv):
         url = "https://public.opendatasoft.com/explore/dataset/us-zip-code-latitude-and-longitude/download/?format=csv&timezone=America/New_York"
         r = requests.get(url)
         with open(zip_csv, "wb") as f:
             f.write(r.content)
-
     df_zip = pd.read_csv(zip_csv)
     df_zip = df_zip.rename(columns={"Zip":"ZIP","Latitude":"Latitude","Longitude":"Longitude"})
     if "Population" not in df_zip.columns:
         df_zip["Population"] = np.random.randint(1000,50000,len(df_zip))
 
-    # 2) FEMA risk placeholder dataset (simplified for demo)
+    # FEMA placeholder
     fema_csv = os.path.join(DATA_DIR, "fema_risk.csv")
     if not os.path.exists(fema_csv):
         counties = df_zip[['County','State']].drop_duplicates()
@@ -43,21 +47,17 @@ def build_datasets():
         counties['FloodRisk'] = np.random.uniform(0,1,len(counties))
         counties['HurricaneRisk'] = np.random.uniform(0,1,len(counties))
         counties.to_csv(fema_csv, index=False)
-
     df_fema = pd.read_csv(fema_csv)
 
-    # Merge ZIP with FEMA risk by County & State
+    # Merge ZIPs with FEMA
     df_zip['County'] = df_zip['County']
     df_zip['State'] = df_zip['State']
     df = pd.merge(df_zip, df_fema, on=['County','State'], how='left')
 
-    # Fill missing risk
+    # Fill missing values
     df['FloodRisk'] = df['FloodRisk'].fillna(df['FloodRisk'].median())
     df['HurricaneRisk'] = df['HurricaneRisk'].fillna(df['HurricaneRisk'].median())
-
-    # Historical damage approximation
     df['HistoricalDamage'] = np.random.randint(5000,2000000,len(df))
-    # Coastal storm risk approximation
     df['CoastalRisk'] = np.clip((df['Longitude']>-90)*np.random.uniform(.2,.9,len(df)),0,1)
 
     return df
@@ -75,11 +75,19 @@ coastal_mult = st.sidebar.slider("Coastal Storm Multiplier", 0.1, 3.0, 1.0)
 zip_lookup = st.sidebar.text_input("ZIP Lookup")
 top_n = st.sidebar.slider("Top N Recommended Hubs", 1, 20, 10)
 
+# Scenario sliders for animation
+flood_scenario = st.sidebar.slider("Flood Severity Scale", 0.0, 2.0, 1.0)
+hurricane_scenario = st.sidebar.slider("Hurricane Severity Scale", 0.0, 2.0, 1.0)
+
 # -------------------
-# COMPUTE RISK WEIGHT
+# COMPUTE WEIGHTED RISK
 # -------------------
 def compute_weight(df):
-    df['RiskWeight'] = df['Population'] * (flood_mult*df['FloodRisk'] + hurr_mult*df['HurricaneRisk'] + coastal_mult*df['CoastalRisk']) * (1 + df['HistoricalDamage']/1e6)
+    df['RiskWeight'] = df['Population'] * (
+        flood_mult*flood_scenario*df['FloodRisk'] + 
+        hurr_mult*hurricane_scenario*df['HurricaneRisk'] + 
+        coastal_mult*df['CoastalRisk']
+    ) * (1 + df['HistoricalDamage']/1e6)
     return df
 
 df = compute_weight(df)
@@ -98,6 +106,30 @@ def optimize_hubs(df, k):
 hubs = optimize_hubs(df, hub_count)
 
 # -------------------
+# REALISTIC TRAVEL TIMES USING ORS API
+# -------------------
+def compute_travel_times(df, hubs):
+    headers = {"Authorization": ORS_API_KEY, "Content-Type": "application/json"}
+    travel_times = []
+    for i, row in df.iterrows():
+        min_time = float('inf')
+        for _, hub in hubs.iterrows():
+            body = {"locations": [[row['Longitude'], row['Latitude']], [hub['Longitude'], hub['Latitude']]], "metrics":["duration"], "units":"m"}
+            try:
+                r = requests.post("https://api.openrouteservice.org/v2/matrix/driving-car", headers=headers, json=body)
+                t = r.json()['durations'][0][1]/60
+                if t < min_time:
+                    min_time = t
+            except:
+                dist = np.sqrt((row['Latitude']-hub['Latitude'])**2 + (row['Longitude']-hub['Longitude'])**2)
+                min_time = min(dist*111/60*1.4, min_time)
+        travel_times.append(min_time)
+    df['TravelMinutes'] = travel_times
+    return df
+
+df = compute_travel_times(df, hubs)
+
+# -------------------
 # ASSIGN NEAREST HUB
 # -------------------
 def assign_hubs(df, hubs):
@@ -106,7 +138,6 @@ def assign_hubs(df, hubs):
     dist = cdist(zip_coords, hub_coords)
     df['NearestHub'] = dist.argmin(axis=1)
     df['Distance'] = dist.min(axis=1)
-    df['TravelMinutes'] = df['Distance'] * 111 / 60 * 1.4
     return df
 
 df = assign_hubs(df, hubs)
@@ -134,8 +165,8 @@ top_recommended = hub_candidates.sort_values('TotalScore', ascending=False).head
 # -------------------
 # DASHBOARD
 # -------------------
-st.title("HydroHub AI: Emergency Hub Optimization for Water Disasters")
-st.write("Maximize response to floods, hurricanes, and coastal storms by optimizing hub placement.")
+st.title("HydroHub AI: Ultimate Emergency Hub Simulation")
+st.write("Interactive, hackathon-ready dashboard for floods, hurricanes, and coastal storms.")
 
 col1,col2,col3 = st.columns(3)
 col1.metric("Population Modeled", int(df["Population"].sum()))
@@ -148,11 +179,13 @@ col3.metric("High Risk ZIPs",(df["RiskWeight"]>df["RiskWeight"].quantile(.9)).su
 m = folium.Map(location=[39,-98], zoom_start=4)
 cluster = MarkerCluster().add_to(m)
 
+# -------------------
+# ADD ZIP POINTS WITH GRADIENT BY RISK
+# -------------------
 sample = df.sample(min(5000,len(df)))
 for _,row in sample.iterrows():
-    color="blue"
-    if row["RiskWeight"]>df["RiskWeight"].quantile(.9):
-        color="red"
+    color_intensity = int(min(255,row["RiskWeight"]/df["RiskWeight"].max()*255))
+    color = f"#{color_intensity:02x}0000"
     folium.CircleMarker(
         location=[row["Latitude"],row["Longitude"]],
         radius=3,
@@ -176,7 +209,20 @@ for _,row in top_recommended.iterrows():
         icon=folium.Icon(color='purple', icon='star')
     ).add_to(m)
 
+# -------------------
+# FEMA FLOOD ZONES (EXAMPLE SHAPEFILE OVERLAY)
+# -------------------
+try:
+    fema_url = "https://hazards.fema.gov/gis/nfhl/rest/services/public/NFHL/MapServer/0/query?where=1=1&outFields=*&f=geojson"
+    r = requests.get(fema_url)
+    flood_geo = r.json()
+    folium.GeoJson(flood_geo, name="FEMA Flood Zones", style_function=lambda x: {"fillColor":"blue","color":"blue","weight":1,"fillOpacity":0.1}).add_to(m)
+except:
+    st.warning("Could not load FEMA flood zones.")
+
+# -------------------
 # ZIP lookup
+# -------------------
 if zip_lookup:
     try:
         z = int(zip_lookup)
@@ -200,31 +246,45 @@ if zip_lookup:
     except:
         st.warning("Enter valid ZIP")
 
+# -------------------
+# ANIMATED HURRICANE SIMULATION
+# -------------------
+try:
+    geojson_features = []
+    for t in range(5):
+        scaled_hurricane = df['HurricaneRisk']*hurricane_scenario*(t+1)/5
+        for _, row in df.iterrows():
+            geojson_features.append({
+                "type":"Feature",
+                "geometry":{"type":"Point","coordinates":[row['Longitude'],row['Latitude']]},
+                "properties":{"time":f"2026-03-15T0{t}:00:00","style":{"color":"orange","radius":scaled_hurricane.iloc[_]*5,"fillColor":"orange"}}})
+    TimestampedGeoJson({"type":"FeatureCollection","features":geojson_features}, period="PT1H", add_last_point=True).add_to(m)
+except:
+    st.warning("Could not load hurricane animation.")
+
 # Risk heatmap
-st.subheader("Risk Heatmap + Hub Coverage")
 heat_data = [[row['Latitude'], row['Longitude'], row['RiskWeight']] for index,row in df.iterrows()]
 HeatMap(heat_data, radius=15, blur=20, max_zoom=10).add_to(m)
 
 # Render map
 st_folium(m, width=1400, height=700)
 
-# Coverage table
+# -------------------
+# CSV DOWNLOADS
+# -------------------
 st.subheader("Hub Coverage")
 st.dataframe(coverage)
 st.download_button("Download Coverage CSV", coverage.to_csv(index=False), "hub_coverage.csv")
 
-# Top 50 high risk ZIPs
 st.subheader("Top 50 High Risk Communities")
 top = df.sort_values("RiskWeight", ascending=False).head(50)
 st.dataframe(top[['ZIP','Population','RiskWeight','NearestHub','TravelMinutes']])
 st.download_button("Download High Risk CSV", top.to_csv(index=False), "high_risk.csv")
 
-# Hub locations
 st.subheader("Hub Locations")
 st.dataframe(hubs)
 st.download_button("Download Hubs CSV", hubs.to_csv(index=False), "hubs.csv")
 
-# Recommended hubs table
 st.subheader("Top Recommended Hub Locations")
 st.dataframe(top_recommended[['Latitude','Longitude','TotalScore','PopulationCovered']])
 st.download_button("Download Recommended Hubs CSV", top_recommended.to_csv(index=False), "recommended_hubs.csv")
