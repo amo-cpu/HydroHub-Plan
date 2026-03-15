@@ -25,17 +25,19 @@ os.makedirs(DATA_DIR, exist_ok=True)
 ORS_API_KEY = st.secrets["ORS_API_KEY"]
 @st.cache_data
 def build_datasets():
-    # -------------------
-    # DOWNLOAD AND EXTRACT SIMPLEMAPS US ZIP CSV
-    # -------------------
+    import os, requests, zipfile, io, pandas as pd, numpy as np
+
+    DATA_DIR = "data"
+    os.makedirs(DATA_DIR, exist_ok=True)
     zip_csv = os.path.join(DATA_DIR, "uszips.csv")
+
+    # Download CSV if not exists
     if not os.path.exists(zip_csv):
-        # SimpleMaps ZIP of CSV
         url = "https://simplemaps.com/static/data/us-zips/1.79/basic/simplemaps_uszips_basicv1.79.zip"
         r = requests.get(url)
         z = zipfile.ZipFile(io.BytesIO(r.content))
         z.extractall(DATA_DIR)
-        # Rename extracted CSV to uszips.csv for consistency
+        # Rename CSV to standard name
         for name in z.namelist():
             if name.lower().endswith(".csv"):
                 os.rename(os.path.join(DATA_DIR, name), zip_csv)
@@ -44,11 +46,10 @@ def build_datasets():
     # Read CSV
     df_zip = pd.read_csv(zip_csv)
 
-    # -------------------
-    # Normalize columns
-    # -------------------
-    df_zip.columns = [c.lower().strip() for c in df_zip.columns]
+    # Normalize column names
+    df_zip.columns = [c.strip().lower() for c in df_zip.columns]
 
+    # Rename columns to standard names
     rename_map = {
         "zip": "ZIP",
         "zipcode": "ZIP",
@@ -65,13 +66,12 @@ def build_datasets():
         "county": "County",
         "city": "City"
     }
+
+    # Apply renaming (ignore keys not in columns)
     df_zip = df_zip.rename(columns={k:v for k,v in rename_map.items() if k in df_zip.columns})
 
-    # -------------------
     # Ensure required columns exist
-    # -------------------
-    required_cols = ["ZIP", "Latitude", "Longitude"]
-    for col in required_cols:
+    for col in ["ZIP", "Latitude", "Longitude"]:
         if col not in df_zip.columns:
             st.error(f"ZIP dataset missing: {col}")
             st.write("Found columns:", df_zip.columns.tolist())
@@ -85,12 +85,10 @@ def build_datasets():
     if "State" not in df_zip.columns:
         df_zip["State"] = "Unknown"
 
-    # -------------------
-    # FEMA flood/hurricane placeholder
-    # -------------------
+    # FEMA placeholder dataset
     fema_csv = os.path.join(DATA_DIR, "fema_risk.csv")
     if not os.path.exists(fema_csv):
-        counties = df_zip[['County','State']].drop_duplicates()
+        counties = df_zip[['County','State']].drop_duplicates().copy()
         np.random.seed(0)
         counties['FloodRisk'] = np.random.uniform(0,1,len(counties))
         counties['HurricaneRisk'] = np.random.uniform(0,1,len(counties))
@@ -98,10 +96,10 @@ def build_datasets():
 
     df_fema = pd.read_csv(fema_csv)
 
-    # Merge ZIPs with FEMA
+    # Merge ZIPs with FEMA risks
     df = pd.merge(df_zip, df_fema, on=['County','State'], how='left')
 
-    # Fill missing values
+    # Fill missing risk values
     df['FloodRisk'] = df['FloodRisk'].fillna(df['FloodRisk'].median())
     df['HurricaneRisk'] = df['HurricaneRisk'].fillna(df['HurricaneRisk'].median())
     df['HistoricalDamage'] = np.random.randint(5000,2000000,len(df))
