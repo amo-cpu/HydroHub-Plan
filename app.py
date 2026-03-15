@@ -657,16 +657,16 @@ df = build_datasets()
 # ──────────────────────────────────────────────────────────────
 # SIDEBAR
 # ──────────────────────────────────────────────────────────────
-st.sidebar.title("🌊 HydroHub Controls")
+st.sidebar.title("HydroHub Controls")
 hub_count    = st.sidebar.slider("Number of Hubs",          3, 60, 15)
 flood_mult   = st.sidebar.slider("Flood Weight",          0.1,3.0,1.0)
 hurr_mult    = st.sidebar.slider("Hurricane Weight",      0.1,3.0,1.0)
 coastal_mult = st.sidebar.slider("Coastal Storm Weight",  0.1,3.0,1.0)
 st.sidebar.markdown("---")
-st.sidebar.subheader("🔍 ZIP / City Lookup")
+st.sidebar.subheader("ZIP / City Lookup")
 zip_lookup = st.sidebar.text_input("Enter ZIP code or city name")
 st.sidebar.markdown("---")
-st.sidebar.subheader("⚡ Disaster Scenario")
+st.sidebar.subheader("Disaster Scenario")
 flood_scenario     = st.sidebar.slider("Flood Severity",     0.0,2.0,1.0)
 hurricane_scenario = st.sidebar.slider("Hurricane Severity", 0.0,2.0,1.0)
 top_n = st.sidebar.slider("Top N Recommended Hubs", 1, 20, 10)
@@ -763,8 +763,8 @@ top_recommended = (
 # ──────────────────────────────────────────────────────────────
 # HEADER METRICS
 # ──────────────────────────────────────────────────────────────
-st.title("🌊 HydroHub AI — Emergency Response Optimizer")
-st.caption("Flood · Hurricane · Coastal Storm · Optimized hub placement")
+st.title("HydroHub — Emergency Response Optimizer")
+st.caption("Flood  |  Hurricane  |  Coastal Storm  |  Optimized hub placement")
 
 c1,c2,c3,c4 = st.columns(4)
 c1.metric("ZIPs Modeled",             f"{len(df):,}")
@@ -798,7 +798,7 @@ if zip_lookup.strip():
         if not city_disp or city_disp in ("Unknown Area","Unknown","unknown"):
             city_disp = city_from_zip(lookup_result["ZIP"]) or f"ZIP {lookup_result['ZIP']}"
 
-        st.success(f"📍 **{city_disp}, {state_disp}** — ZIP {lookup_result['ZIP']}")
+        st.success(f"**{city_disp}, {state_disp}** — ZIP {lookup_result['ZIP']}")
 
         r1c1,r1c2,r1c3,r1c4 = st.columns(4)
         r1c1.metric("City",           city_disp)
@@ -926,8 +926,8 @@ if lookup_result is not None:
     folium.Marker(
         location=[float(lookup_result["Latitude"]),float(lookup_result["Longitude"])],
         icon=folium.Icon(color="red",icon="crosshairs",prefix="fa"),
-        popup=f"📍 {city_lbl}, {state_lbl}",
-        tooltip=f"📍 {city_lbl}, {state_lbl}",
+        popup=f"{city_lbl}, {state_lbl}",
+        tooltip=f"{city_lbl}, {state_lbl}",
     ).add_to(m)
 
 folium.LayerControl().add_to(m)
@@ -938,7 +938,7 @@ st_folium(m, width=None, height=650, returned_objects=[])
 # ──────────────────────────────────────────────────────────────
 st.divider()
 tab1,tab2,tab3,tab4 = st.tabs(
-    ["🚁 Hub Coverage","⚠️ High-Risk Areas","📍 Hub Locations","⭐ Recommended Hubs"]
+    ["Hub Coverage","High-Risk Areas","Hub Locations","Recommended Hubs"]
 )
 
 with tab1:
@@ -955,7 +955,7 @@ with tab1:
         }),
         use_container_width=True,
     )
-    st.download_button("⬇ Download CSV", disp.to_csv(index=False),
+    st.download_button("Download CSV", disp.to_csv(index=False),
                        "hub_coverage.csv","text/csv")
 
 with tab2:
@@ -972,7 +972,7 @@ with tab2:
         }).background_gradient(subset=["RiskWeight"],cmap="Reds"),
         use_container_width=True,
     )
-    st.download_button("⬇ Download CSV", top100.to_csv(index=False),
+    st.download_button("Download CSV", top100.to_csv(index=False),
                        "high_risk_zips.csv","text/csv")
 
 with tab3:
@@ -983,7 +983,7 @@ with tab3:
         hubs_disp[["HubID","City","State","Latitude","Longitude"]],
         use_container_width=True,
     )
-    st.download_button("⬇ Download CSV",
+    st.download_button("Download CSV",
                        hubs_disp[["HubID","City","State","Latitude","Longitude"]] \
                            .to_csv(index=False),
                        "hubs.csv","text/csv")
@@ -998,6 +998,6 @@ with tab4:
         }),
         use_container_width=True,
     )
-    st.download_button("⬇ Download CSV",
+    st.download_button("Download CSV",
                        top_recommended[rec_cols].to_csv(index=False),
                        "recommended_hubs.csv","text/csv")
