@@ -13,7 +13,6 @@ import geopandas as gpd
 from geopy.geocoders import Nominatim
 import networkx as nx
 import osmnx as ox
-
 st.set_page_config(layout="wide")
 
 # -------------------
@@ -39,22 +38,40 @@ def build_datasets():
             f.write(r.content)
     df_zip = pd.read_csv(zip_csv)
 
-    # Standardize column names from different ZIP datasets
-    df_zip.columns = [c.strip() for c in df_zip.columns]
+   # -------------------
+# Standardize columns robustly
+# -------------------
+df_zip.columns = [c.lower().strip() for c in df_zip.columns]
 
-    if 'Zip' in df_zip.columns:
-        df_zip.rename(columns={'Zip':'ZIP'}, inplace=True)
-    if 'zip' in df_zip.columns:
-        df_zip.rename(columns={'zip':'ZIP'}, inplace=True)
+# Rename known variations to standard names
+rename_map = {
+    "zip": "ZIP",
+    "zipcode": "ZIP",
+    "latitude": "Latitude",
+    "lat": "Latitude",
+    "longitude": "Longitude",
+    "lng": "Longitude",
+    "lon": "Longitude",
+    "county": "County",
+    "state": "State"
+}
+df_zip = df_zip.rename(columns={k:v for k,v in rename_map.items() if k in df_zip.columns})
 
-    if 'Latitude' not in df_zip.columns:
-        if 'lat' in df_zip.columns:
-            df_zip.rename(columns={'lat':'Latitude'}, inplace=True)
-    if 'Longitude' not in df_zip.columns:
-        if 'lng' in df_zip.columns:
-            df_zip.rename(columns={'lng':'Longitude'}, inplace=True)
-        if 'lon' in df_zip.columns:
-            df_zip.rename(columns={'lon':'Longitude'}, inplace=True)
+# Ensure required columns exist
+required_cols = ["ZIP","Latitude","Longitude"]
+for col in required_cols:
+    if col not in df_zip.columns:
+        st.error(f"ZIP dataset missing required column: {col}")
+        st.write("Columns found:", df_zip.columns)
+        st.stop()
+
+# Add missing columns
+if "Population" not in df_zip.columns:
+    df_zip["Population"] = np.random.randint(1000,50000,len(df_zip))
+if "County" not in df_zip.columns:
+    df_zip["County"] = "Unknown"
+if "State" not in df_zip.columns:
+    df_zip["State"] = "Unknown"
 
     # If still missing coordinates, stop early
     if 'Latitude' not in df_zip.columns or 'Longitude' not in df_zip.columns:
