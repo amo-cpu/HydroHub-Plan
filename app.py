@@ -23,15 +23,6 @@ os.makedirs(DATA_DIR, exist_ok=True)
 
 # API key from Streamlit secrets
 ORS_API_KEY = st.secrets["ORS_API_KEY"]
-
-# -------------------
-# DATASETS DOWNLOAD/BUILD
-# -------------------
-@st.cache_data
-def build_datasets():
-    # -------------------
-# DOWNLOAD AND EXTRACT SIMPLEMAPS US ZIP CSV
-# -------------------
 @st.cache_data
 def build_datasets():
     # -------------------
