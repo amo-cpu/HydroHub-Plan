@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import os
+import requests, zipfile, io
 from sklearn.cluster import KMeans
 from scipy.spatial.distance import cdist
 from folium.plugins import MarkerCluster, HeatMap
@@ -17,39 +18,51 @@ DATA_DIR = "data"
 os.makedirs(DATA_DIR, exist_ok=True)
 
 # -------------------
-# LOAD DATA
+# AUTOMATIC DATA DOWNLOAD / BUILD
 # -------------------
 @st.cache_data
-def load_data():
-    # ZIP codes
-    zip_file = os.path.join(DATA_DIR, "uszips.csv")
-    df_zip = pd.read_csv(zip_file)
-    df_zip = df_zip.rename(columns={"zip":"ZIP","lat":"Latitude","lng":"Longitude"})
-    df_zip["Population"] = df_zip.get("population", pd.Series(np.random.randint(1000,50000,len(df_zip))))
-    
-    # FEMA risk
-    fema_file = os.path.join(DATA_DIR, "fema_risk.csv")
-    df_fema = pd.read_csv(fema_file)
-    df_fema = df_fema.rename(columns={"COUNTY":"County","STATE":"State","FLOOD_RISK":"FloodRisk","STORM_RISK":"HurricaneRisk"})
-    
-    # Merge ZIP with FEMA risk
-    df_zip['County'] = df_zip['county_name']
-    df_zip['State'] = df_zip['state_id']
-    df = pd.merge(df_zip, df_fema[['County','State','FloodRisk','HurricaneRisk']], on=['County','State'], how='left')
-    
-    # Fill missing risk values
+def build_datasets():
+    # 1) US ZIP codes + lat/lon + population
+    zip_csv = os.path.join(DATA_DIR, "uszips.csv")
+    if not os.path.exists(zip_csv):
+        url = "https://public.opendatasoft.com/explore/dataset/us-zip-code-latitude-and-longitude/download/?format=csv&timezone=America/New_York"
+        r = requests.get(url)
+        with open(zip_csv, "wb") as f:
+            f.write(r.content)
+
+    df_zip = pd.read_csv(zip_csv)
+    df_zip = df_zip.rename(columns={"Zip":"ZIP","Latitude":"Latitude","Longitude":"Longitude"})
+    if "Population" not in df_zip.columns:
+        df_zip["Population"] = np.random.randint(1000,50000,len(df_zip))
+
+    # 2) FEMA risk placeholder dataset (simplified for demo)
+    fema_csv = os.path.join(DATA_DIR, "fema_risk.csv")
+    if not os.path.exists(fema_csv):
+        counties = df_zip[['County','State']].drop_duplicates()
+        np.random.seed(0)
+        counties['FloodRisk'] = np.random.uniform(0,1,len(counties))
+        counties['HurricaneRisk'] = np.random.uniform(0,1,len(counties))
+        counties.to_csv(fema_csv, index=False)
+
+    df_fema = pd.read_csv(fema_csv)
+
+    # Merge ZIP with FEMA risk by County & State
+    df_zip['County'] = df_zip['County']
+    df_zip['State'] = df_zip['State']
+    df = pd.merge(df_zip, df_fema, on=['County','State'], how='left')
+
+    # Fill missing risk
     df['FloodRisk'] = df['FloodRisk'].fillna(df['FloodRisk'].median())
     df['HurricaneRisk'] = df['HurricaneRisk'].fillna(df['HurricaneRisk'].median())
-    
-    # Historical damage (placeholder)
+
+    # Historical damage approximation
     df['HistoricalDamage'] = np.random.randint(5000,2000000,len(df))
-    
-    # Coastal risk approximation
+    # Coastal storm risk approximation
     df['CoastalRisk'] = np.clip((df['Longitude']>-90)*np.random.uniform(.2,.9,len(df)),0,1)
-    
+
     return df
 
-df = load_data()
+df = build_datasets()
 
 # -------------------
 # SIDEBAR CONTROLS
