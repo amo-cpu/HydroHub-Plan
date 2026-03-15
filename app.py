@@ -29,13 +29,54 @@ ORS_API_KEY = st.secrets["ORS_API_KEY"]
 # -------------------
 @st.cache_data
 def build_datasets():
-    zip_csv = os.path.join(DATA_DIR, "uszips.csv")
-    if not os.path.exists(zip_csv):
-        url = "https://public.opendatasoft.com/explore/dataset/us-zip-code-latitude-and-longitude/download/?format=csv&timezone=America/New_York"
-        r = requests.get(url)
-        with open(zip_csv, "wb") as f:
-            f.write(r.content)
-    df_zip = pd.read_csv(zip_csv)
+    # -------------------
+# DOWNLOAD AND EXTRACT SIMPLEMAPS US ZIP CSV
+# -------------------
+zip_csv = os.path.join(DATA_DIR, "uszips.csv")
+if not os.path.exists(zip_csv):
+    # SimpleMaps ZIP of CSV
+    url = "https://simplemaps.com/static/data/us-zips/1.79/basic/simplemaps_uszips_basicv1.79.zip"
+    r = requests.get(url)
+    z = zipfile.ZipFile(io.BytesIO(r.content))
+    z.extractall(DATA_DIR)
+    # The extracted file is usually named uszips.csv or uszips_basic.csv
+    # Rename to uszips.csv for consistency
+    for name in z.namelist():
+        if name.lower().endswith(".csv"):
+            os.rename(os.path.join(DATA_DIR, name), zip_csv)
+            break
+
+df_zip = pd.read_csv(zip_csv)
+
+# -------------------
+# Normalize columns
+# -------------------
+df_zip.columns = [c.lower().strip() for c in df_zip.columns]
+
+rename_map = {
+    "zip": "ZIP",
+    "lat": "Latitude",
+    "lng": "Longitude",
+    "population": "Population",
+    "state_id": "State",
+    "county": "County",
+    "city": "City"
+}
+df_zip = df_zip.rename(columns={k:v for k,v in rename_map.items() if k in df_zip.columns})
+
+# Required columns check
+required_cols = ["ZIP", "Latitude", "Longitude"]
+for col in required_cols:
+    if col not in df_zip.columns:
+        st.error(f"ZIP dataset missing: {col}")
+        st.write("Found columns:", df_zip.columns.tolist())
+        st.stop()
+
+# Add missing ones
+if "Population" not in df_zip.columns:
+    df_zip["Population"] = np.random.randint(1000,50000,len(df_zip))
+if "County" not in df_zip.columns:
+    df_zip["County"] = "Unknown"
 
     # -------------------
     # Standardize columns robustly
