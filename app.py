@@ -385,6 +385,8 @@ ZIP3_CITY = {
     "989":"Wenatchee","990":"Spokane","991":"Spokane","992":"Spokane",
     "993":"Kennewick","994":"Walla Walla",
     "995":"Anchorage","996":"Fairbanks","997":"Juneau","998":"Fairbanks","999":"Nome",
+    "005":"New York","006":"San Juan","007":"San Juan","008":"St Thomas","009":"San Juan",
+    "340":"Honolulu","397":"Albany","398":"Brunswick","399":"Savannah","509":"Iowa City",
 }
 
 def city_from_zip(zip_code: str) -> str:
@@ -507,8 +509,18 @@ def _normalize(df: pd.DataFrame) -> pd.DataFrame:
         )
 
     # Final fallback: anything still empty gets a generic label
-    df["City"]  = df["City"].replace("", "Unknown Area").fillna("Unknown Area")
-    df["State"] = df["State"].replace("", "??").fillna("??")
+    # Final fallback: use state name, or ZIP itself for truly unknown prefixes
+    def _city_fallback(row):
+        c = row["City"]
+        if c:
+            return c
+        # Unknown USPS prefix — use state if available, else ZIP
+        st = row.get("State", "")
+        if st and st not in ("", "??"):
+            return st + " area"
+        return row["ZIP"]
+    df["City"] = df.apply(_city_fallback, axis=1)
+    df["State"] = df["State"].fillna("")
 
     return df.reset_index(drop=True)
 
@@ -795,7 +807,7 @@ if zip_lookup.strip():
         city_disp  = str(lookup_result.get("City",""))
         state_disp = str(lookup_result.get("State",""))
         # If city is still blank/Unknown Area, derive from ZIP
-        if not city_disp or city_disp in ("Unknown Area","Unknown","unknown"):
+        if not city_disp or city_disp in ("Unknown","unknown"):
             city_disp = city_from_zip(lookup_result["ZIP"]) or f"ZIP {lookup_result['ZIP']}"
 
         st.success(f"**{city_disp}, {state_disp}** — ZIP {lookup_result['ZIP']}")
@@ -857,7 +869,7 @@ for _, row in sample.iterrows():
     intensity = int(min(255, row["RiskWeight"]/risk_max*255))
     color     = f"#{intensity:02x}{(255-intensity)//2:02x}00"
     city_lbl  = str(row.get("City",""))
-    if not city_lbl or city_lbl in ("Unknown Area","Unknown","unknown"):
+    if not city_lbl or city_lbl in ("Unknown","unknown"):
         city_lbl = city_from_zip(row["ZIP"]) or row["ZIP"]
     folium.CircleMarker(
         location=[row["Latitude"],row["Longitude"]],
@@ -881,7 +893,7 @@ for _, hub in hubs.iterrows():
     zips_cov = int(cov_row["ZIPsCovered"].iloc[0])        if len(cov_row) else 0
     hub_city = str(cov_row["HubCity"].iloc[0])            if len(cov_row) else ""
     hub_st   = str(cov_row["HubState"].iloc[0])           if len(cov_row) else ""
-    if not hub_city or hub_city in ("Unknown Area","Unknown","unknown"):
+    if not hub_city or hub_city in ("Unknown","unknown"):
         hub_city = city_from_zip(str(hub.get("ZIP",""))) or "Hub Area"
     folium.Marker(
         location=[hub["Latitude"],hub["Longitude"]],
@@ -903,7 +915,7 @@ for _, hub in hubs.iterrows():
 
 for _, row in top_recommended.iterrows():
     city_lbl = str(row.get("City",""))
-    if not city_lbl or city_lbl in ("Unknown Area","Unknown","unknown"):
+    if not city_lbl or city_lbl in ("Unknown","unknown"):
         city_lbl = city_from_zip(row["ZIP"]) or row["ZIP"]
     folium.Marker(
         location=[row["Latitude"],row["Longitude"]],
@@ -921,7 +933,7 @@ for _, row in top_recommended.iterrows():
 if lookup_result is not None:
     city_lbl  = str(lookup_result.get("City",""))
     state_lbl = str(lookup_result.get("State",""))
-    if not city_lbl or city_lbl in ("Unknown Area","Unknown","unknown"):
+    if not city_lbl or city_lbl in ("Unknown","unknown"):
         city_lbl = city_from_zip(lookup_result["ZIP"]) or lookup_result["ZIP"]
     folium.Marker(
         location=[float(lookup_result["Latitude"]),float(lookup_result["Longitude"])],
