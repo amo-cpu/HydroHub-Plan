@@ -44,16 +44,18 @@ def build_datasets():
 
     # Rename known variations to standard names
     rename_map = {
-        "zip": "ZIP",
-        "zipcode": "ZIP",
-        "latitude": "Latitude",
-        "lat": "Latitude",
-        "longitude": "Longitude",
-        "lng": "Longitude",
-        "lon": "Longitude",
-        "county": "County",
-        "state": "State"
-    }
+    "zip": "ZIP",
+    "zipcode": "ZIP",
+    "zip_code": "ZIP",
+    "postal_code": "ZIP",
+    "latitude": "Latitude",
+    "lat": "Latitude",
+    "longitude": "Longitude",
+    "lng": "Longitude",
+    "lon": "Longitude",
+    "county": "County",
+    "state": "State"
+}
     df_zip = df_zip.rename(columns={k:v for k,v in rename_map.items() if k in df_zip.columns})
 
     # Ensure required columns exist
