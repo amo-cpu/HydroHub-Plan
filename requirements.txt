@@ -9,3 +9,6 @@ requests
 matplotlib
 shapely
 geopandas
+geopy
+osmnx
+networkx
