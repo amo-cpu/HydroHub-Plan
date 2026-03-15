@@ -32,82 +32,61 @@ def build_datasets():
     # -------------------
 # DOWNLOAD AND EXTRACT SIMPLEMAPS US ZIP CSV
 # -------------------
-zip_csv = os.path.join(DATA_DIR, "uszips.csv")
-if not os.path.exists(zip_csv):
-    # SimpleMaps ZIP of CSV
-    url = "https://simplemaps.com/static/data/us-zips/1.79/basic/simplemaps_uszips_basicv1.79.zip"
-    r = requests.get(url)
-    z = zipfile.ZipFile(io.BytesIO(r.content))
-    z.extractall(DATA_DIR)
-    # The extracted file is usually named uszips.csv or uszips_basic.csv
-    # Rename to uszips.csv for consistency
-    for name in z.namelist():
-        if name.lower().endswith(".csv"):
-            os.rename(os.path.join(DATA_DIR, name), zip_csv)
-            break
+@st.cache_data
+def build_datasets():
+    # -------------------
+    # DOWNLOAD AND EXTRACT SIMPLEMAPS US ZIP CSV
+    # -------------------
+    zip_csv = os.path.join(DATA_DIR, "uszips.csv")
+    if not os.path.exists(zip_csv):
+        # SimpleMaps ZIP of CSV
+        url = "https://simplemaps.com/static/data/us-zips/1.79/basic/simplemaps_uszips_basicv1.79.zip"
+        r = requests.get(url)
+        z = zipfile.ZipFile(io.BytesIO(r.content))
+        z.extractall(DATA_DIR)
+        # Rename extracted CSV to uszips.csv for consistency
+        for name in z.namelist():
+            if name.lower().endswith(".csv"):
+                os.rename(os.path.join(DATA_DIR, name), zip_csv)
+                break
 
-df_zip = pd.read_csv(zip_csv)
-
-# -------------------
-# Normalize columns
-# -------------------
-df_zip.columns = [c.lower().strip() for c in df_zip.columns]
-
-rename_map = {
-    "zip": "ZIP",
-    "lat": "Latitude",
-    "lng": "Longitude",
-    "population": "Population",
-    "state_id": "State",
-    "county": "County",
-    "city": "City"
-}
-df_zip = df_zip.rename(columns={k:v for k,v in rename_map.items() if k in df_zip.columns})
-
-# Required columns check
-required_cols = ["ZIP", "Latitude", "Longitude"]
-for col in required_cols:
-    if col not in df_zip.columns:
-        st.error(f"ZIP dataset missing: {col}")
-        st.write("Found columns:", df_zip.columns.tolist())
-        st.stop()
-
-# Add missing ones
-if "Population" not in df_zip.columns:
-    df_zip["Population"] = np.random.randint(1000,50000,len(df_zip))
-if "County" not in df_zip.columns:
-    df_zip["County"] = "Unknown"
+    # Read CSV
+    df_zip = pd.read_csv(zip_csv)
 
     # -------------------
-    # Standardize columns robustly
+    # Normalize columns
     # -------------------
     df_zip.columns = [c.lower().strip() for c in df_zip.columns]
 
-    # Rename known variations to standard names
     rename_map = {
-    "zip": "ZIP",
-    "zipcode": "ZIP",
-    "zip_code": "ZIP",
-    "postal_code": "ZIP",
-    "latitude": "Latitude",
-    "lat": "Latitude",
-    "longitude": "Longitude",
-    "lng": "Longitude",
-    "lon": "Longitude",
-    "county": "County",
-    "state": "State"
-}
+        "zip": "ZIP",
+        "zipcode": "ZIP",
+        "zip_code": "ZIP",
+        "postal_code": "ZIP",
+        "lat": "Latitude",
+        "latitude": "Latitude",
+        "lng": "Longitude",
+        "lon": "Longitude",
+        "longitude": "Longitude",
+        "population": "Population",
+        "state_id": "State",
+        "state": "State",
+        "county": "County",
+        "city": "City"
+    }
     df_zip = df_zip.rename(columns={k:v for k,v in rename_map.items() if k in df_zip.columns})
 
+    # -------------------
     # Ensure required columns exist
-    required_cols = ["ZIP","Latitude","Longitude"]
+    # -------------------
+    required_cols = ["ZIP", "Latitude", "Longitude"]
     for col in required_cols:
         if col not in df_zip.columns:
-            st.error(f"ZIP dataset missing required column: {col}")
-            st.write("Columns found:", df_zip.columns)
+            st.error(f"ZIP dataset missing: {col}")
+            st.write("Found columns:", df_zip.columns.tolist())
             st.stop()
 
-    # Add missing columns
+    # Fill missing optional columns
     if "Population" not in df_zip.columns:
         df_zip["Population"] = np.random.randint(1000,50000,len(df_zip))
     if "County" not in df_zip.columns:
@@ -115,7 +94,9 @@ if "County" not in df_zip.columns:
     if "State" not in df_zip.columns:
         df_zip["State"] = "Unknown"
 
+    # -------------------
     # FEMA flood/hurricane placeholder
+    # -------------------
     fema_csv = os.path.join(DATA_DIR, "fema_risk.csv")
     if not os.path.exists(fema_csv):
         counties = df_zip[['County','State']].drop_duplicates()
