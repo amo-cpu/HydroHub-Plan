@@ -327,4 +327,3 @@ st.download_button("Download Hubs CSV", hubs.to_csv(index=False), "hubs.csv")
 st.subheader("Top Recommended Hub Locations")
 st.dataframe(top_recommended[['Latitude','Longitude','TotalScore','PopulationCovered']])
 st.download_button("Download Recommended Hubs CSV", top_recommended.to_csv(index=False), "recommended_hubs.csv")
-
